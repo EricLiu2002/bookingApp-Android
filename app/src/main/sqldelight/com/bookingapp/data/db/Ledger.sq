@@ -1,0 +1,121 @@
+-- Schema statements are copied verbatim from reference/backend/V1__create_schema.sql and
+-- V2__seed_categories.sql. SchemaParityTest fails if they drift from the backend.
+
+CREATE TABLE category (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT    NOT NULL UNIQUE
+);
+
+CREATE TABLE transaction_entry (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    type         TEXT    NOT NULL CHECK (type IN ('COST', 'EARNING')),
+    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+    entry_date   TEXT    NOT NULL,
+    category_id  INTEGER NOT NULL REFERENCES category (id),
+    note         TEXT,
+    created_at   TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL
+);
+
+CREATE INDEX ix_transaction_entry_date_created ON transaction_entry (entry_date, created_at);
+
+INSERT INTO category (name) VALUES
+    ('CL - Apparel'),
+    ('CL - Laundry & Cleaning'),
+    ('CL - Haircuts'),
+    ('FO - Eating Out'),
+    ('FO - Groceries'),
+    ('HO - Mortgage'),
+    ('HO - Insurance'),
+    ('HO - Property Tax'),
+    ('HO - Repairs'),
+    ('HO - Renovation'),
+    ('HO - Household Supplies'),
+    ('HO - Phone & Internet'),
+    ('HO - Plants'),
+    ('HO - Gifts'),
+    ('TR - Gas'),
+    ('TR - Insurance'),
+    ('TR - Repairs'),
+    ('TR - Car Loan'),
+    ('TR - Parking'),
+    ('TR - Public Transit'),
+    ('KI - Toys'),
+    ('KI - Education'),
+    ('EN - Sports'),
+    ('EN - Travel'),
+    ('EN - Books'),
+    ('EN - Lottery'),
+    ('HE - Medical'),
+    ('HE - Medicine'),
+    ('HE - Insurance'),
+    ('IN - Sa'),
+    ('IN - Ot'),
+    ('IN - Bo') ;
+
+-- Categories -------------------------------------------------------------------------
+
+selectAllCategories:
+SELECT id, name FROM category ORDER BY name;
+
+categoryExists:
+SELECT COUNT(*) FROM category WHERE id = :id;
+
+-- Transactions -----------------------------------------------------------------------
+
+insertTransaction:
+INSERT INTO transaction_entry (type, amount_minor, entry_date, category_id, note, created_at, updated_at)
+VALUES (:type, :amountMinor, :entryDate, :categoryId, :note, :createdAt, :updatedAt);
+
+lastInsertId:
+SELECT last_insert_rowid();
+
+updateTransaction:
+UPDATE transaction_entry
+SET type = :type, amount_minor = :amountMinor, entry_date = :entryDate, category_id = :categoryId,
+    note = :note, updated_at = :updatedAt
+WHERE id = :id;
+
+changes:
+SELECT changes();
+
+deleteTransaction:
+DELETE FROM transaction_entry WHERE id = :id;
+
+selectTransactionById:
+SELECT t.id, t.type, t.amount_minor, t.entry_date, t.category_id, c.name AS category_name, t.note,
+       t.created_at, t.updated_at
+FROM transaction_entry t JOIN category c ON c.id = t.category_id
+WHERE t.id = :id;
+
+-- Transactions dated in [from, to), newest first; same day: most recently created first.
+selectInRange:
+SELECT t.id, t.type, t.amount_minor, t.entry_date, t.category_id, c.name AS category_name, t.note,
+       t.created_at, t.updated_at
+FROM transaction_entry t JOIN category c ON c.id = t.category_id
+WHERE t.entry_date >= :from AND t.entry_date < :to AND (:type IS NULL OR t.type = :type)
+ORDER BY t.entry_date DESC, t.created_at DESC, t.id DESC;
+
+-- Summaries over [from, to) ----------------------------------------------------------
+
+periodTotals:
+SELECT
+    CAST(COALESCE(SUM(CASE WHEN type = 'EARNING' THEN amount_minor END), 0) AS INTEGER) AS income,
+    CAST(COALESCE(SUM(CASE WHEN type = 'COST' THEN amount_minor END), 0) AS INTEGER) AS outcome
+FROM transaction_entry
+WHERE entry_date >= :from AND entry_date < :to;
+
+-- One row per (category, type): costs first, then amount descending, then category name.
+periodBreakdown:
+SELECT t.category_id, c.name AS category_name, t.type, CAST(SUM(t.amount_minor) AS INTEGER) AS total_minor
+FROM transaction_entry t JOIN category c ON c.id = t.category_id
+WHERE t.entry_date >= :from AND t.entry_date < :to
+GROUP BY t.category_id, t.type
+ORDER BY t.type ASC, total_minor DESC, c.name ASC;
+
+-- Duplicate detection: ledger rows per (date, amount, category, type) in [from, to].
+countMatching:
+SELECT entry_date, amount_minor, category_id, type, COUNT(*) AS matches
+FROM transaction_entry
+WHERE entry_date >= :from AND entry_date <= :to
+GROUP BY entry_date, amount_minor, category_id, type;
