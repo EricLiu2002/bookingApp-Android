@@ -21,8 +21,3 @@
 2026/9/20,8.75,行-公共交通,
 2026/9/21,64.20,住-维修,
 2026-09-30,3500,IN - Sa,September salary
-
-###../robolectric.properties
-sdk=35
-sqliteMode=NATIVE
-graphicsMode=LEGACY
